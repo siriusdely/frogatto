@@ -1,0 +1,228 @@
+# Languages to generate font texture for
+LANGUAGES = [
+  'zh_CN',
+  'ja',
+  'ko'
+]
+
+EXTRA_FML = Hash.new('').merge({
+#  'ja' => "kerning=-1",
+})
+
+def source_font(language, style)
+  case style
+  when :dialog
+    ['source_fonts/unifont.pcf.gz', 16]
+  else # :outline, :label
+    case language
+    when 'zh_CN'
+      ['source_fonts/wenquanyi_9pt.pcf.gz', 12]
+    when 'ko'
+      ['source_fonts/dotum+ascii-10.bdf', 10]
+    when 'ja'
+      ['source_fonts/mplus+ascii-10.bdf', 10]
+    end
+  end
+end
+
+# Command template to generate glyph images for each font style
+FONT_STYLES = {
+  :dialog => <<-DIALOG, 
+convert -background none -font '%{font}' -pointsize %{point_size} \
+        -fill '#f5f5f5' label:%{character} png32:%{glyph}
+  DIALOG
+
+  :outline => <<-'OUTLINE',
+convert \( -background none -fill '#550b0b' -font '%{font}' -pointsize %{point_size} \
+        label:%{character} \) \
+        \( -background none -fill '#e9f9f9' -font '%{font}' -pointsize %{point_size} \
+        label:%{character} \) \
+        \( -clone 0 -repage -1-1 \) \
+        \( -clone 0 -repage -1+1 \) \
+        \( -clone 0 -repage +1+1 \) \
+        \( -clone 0 -repage +1-1 \) \
+        -delete 0 -reverse -layers merge +repage png32:%{glyph}
+  OUTLINE
+
+  :label => <<-'LABEL'
+convert \( -background none -fill '#000000' -font '%{font}' -pointsize %{point_size} \
+        label:%{character} \) \
+        \( -background none -fill '#ffffff' -font '%{font}' -pointsize %{point_size} \
+        label:%{character} \) \
+        \( -clone 0 -repage -0-1 \) \
+        -delete 0 -reverse -layers merge +repage png32:%{glyph}
+  LABEL
+}
+
+FONT_CFG_IDS = {
+  :dialog  => 'default',
+  :label   => 'door_label',
+  :outline => 'white_outline'
+}
+
+# Naming scheme of font textures
+def font_texture(style, language)
+  "../../images/gui/#{style}_font.#{language}.png"
+end
+
+# Naming scheme of locale specific fonts.cfg
+def fonts_cfg(language)
+  "../..//data/fonts.#{language}.cfg"
+end
+# Naming scheme of fonts.cfg snippets
+def font_cfg_snippet(style, language)
+  "../../data/#{style}_font.#{language}.cfg"
+end
+
+# Naming scheme of character lists
+def character_list(language)
+  "tmp/fonts/#{language}/characters.txt"
+end
+
+# Naming scheme of po files
+def po_file(language)
+  "../../po/#{language}.po"
+end
+
+# Naming scheme of font generation working path
+def work_path(style, language)
+  "tmp/fonts/#{language}/#{style}"
+end
+
+# Naming scheme of glyphs
+def glyph_image(style, language, character)
+  File.join work_path(style, language), "#{codepoint_of(character)}.png"
+end
+
+# Naming scheme of font tasks
+def font_task(style, language)
+  "font:#{style}:#{language}"
+end
+
+# Naming scheme of glyph tasks
+def glyphs_task(style, language)
+  "glyphs:#{style}:#{language}"
+end
+
+# Width and height of an image
+def image_size(path)
+  `file #{path}` =~ /(\d+)\s*x\s*(\d+)/
+  [$1, $2].map(&method(:Integer))
+end
+
+# Unicode codepoint of a character
+def codepoint_of(character)
+  character.unpack('U*').first
+end
+
+# Character with given unicode codepoint
+def character_with_codepoint(codepoint)
+  [codepoint].pack('U*')
+end
+
+task :default => :fonts
+
+desc 'Generate all font textures and fonts.cfg snippets'
+task :fonts => (LANGUAGES.map do |language|
+  desc "Generate #{language} font textures and fonts.cfg snippets"
+  task language => [
+    fonts_cfg(language),
+    *FONT_STYLES.keys.map do |style|
+       font_texture(style, language)
+    end
+  ]
+end)
+
+FONT_STYLES.each_key do |style|
+  work_path = work_path(style, 'latin')
+  directory work_path
+
+  task glyphs_task(style, 'latin') => work_path do
+    latin_characters =
+      ['a'..'z', 'A'..'Z', '0'..'9'].map(&:to_a).join + ' `~!#$%^&*()-_=+[]{};:",.<>/?|→←↑↓'
+    latin_font = ["../../", "anura"].map do |prefix|
+      "#{prefix}/data/#{style}_font.cfg"
+    end.find do |file|
+      File.exist? file
+    end
+
+    sh "echo '#{latin_characters}' | ./extract_glyphs.rb #{work_path} #{latin_font}"
+  end
+end
+
+# We need to generate a texture and snippet for each pair of (language, font style)
+LANGUAGES.each do |language|
+  character_list = character_list(language)
+  msgstr_text = "#{character_list}.raw"
+  po_file = po_file(language)
+  language_work_path = work_path('', language)
+  directory language_work_path
+  desc "Generate #{language} character list"
+  file character_list => [po_file, language_work_path] do
+    sh <<-SCRIPT
+      cat /dev/null > #{msgstr_text}
+      msggrep -v -N CHANGELOG -N MAC_APP_STORE_METADATA \
+                 -N iOS_CHANGELOG -N iOS_APP_STORE_METADATA #{po_file} | \
+      msgfilter --keep-header -o /dev/null tee -a #{msgstr_text}
+      cat #{msgstr_text} | ./strip_po_markup.sh \
+                         | ./uniq_chars.rb > #{character_list}
+    SCRIPT
+  end
+
+  file fonts_cfg(language) do |t|
+    File.open(t.name, 'w') do |file|
+      file.write <<-EOF
+      {
+      font: ["@flatten",
+	"@include data/number_font_large.cfg",
+	"@include data/outline_font.#{language}.cfg",
+	"@include data/label_font.#{language}.cfg",
+	"@include data/dialog_font.#{language}.cfg"
+      ],
+      }
+      EOF
+    end
+  end
+
+  FONT_STYLES.each_pair do |style, command|
+    work_path = work_path(style, language)
+    directory work_path
+
+    glyph_pattern = 
+      Regexp.new(Regexp.escape(glyph_image(style, language, 'a')).sub(/\d+/, '.+'))
+    rule glyph_pattern => work_path do |t|
+      glyph = t.name
+      character = character_with_codepoint(Integer(glyph[/(\d+)/, 1]))
+      # escape for shell
+      if character == "'"
+        character = %q("'")
+      else
+        character = "'#{character}'"
+      end
+      (font, point_size) = source_font(language, style)
+      sh(command % {:font => font, :point_size => point_size, :character => character,
+                    :glyph => glyph, :work_path => work_path})
+    end
+
+    glyphs = {}
+
+    glyphs_task = glyphs_task(style, language) 
+    task glyphs_task => character_list do 
+      File.read(character_list).chars.each do |character|
+        glyph = glyph_image(style, language, character)
+        glyphs[glyph] = character
+        Rake::Task[glyph].invoke
+      end
+    end
+
+    font_texture = font_texture(style, language)
+    desc "Generate #{language} #{style} font texture"
+    task font_texture => [work_path, glyphs_task, glyphs_task(style, 'latin')] do
+      sh <<-SCRIPT
+      cp #{work_path(style, 'latin')}/* #{work_path}
+      ./build_font.rb #{work_path} ../../data/#{style}_font.#{language}.cfg #{FONT_CFG_IDS[style]}
+      SCRIPT
+    end
+  end
+end
+

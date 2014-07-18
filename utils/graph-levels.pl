@@ -9,14 +9,25 @@ use strict;
 
 # appending --show_heart_pieces after utils/graph-levels.pl will write the number of max heart piece objects in the level, by type
 
+# to make a graph starting from a specific level at the top, move that level to a folder that would be the first in the alphabetical order, e.g., put frogatto-grotto-frogattos-room.cfg inside _Seaside
+
 my $show_music = 0;
 my $show_heart_pieces = 0;
+my $show_coins = 0;
+my $show_palettes = 0;
+my $show_pathnames = 1;
 
 while(my $arg = shift @ARGV) {
 	if($arg eq '--show_music') {
 		$show_music = 1;
 	} elsif($arg eq '--show_heart_pieces') {
 		$show_heart_pieces = 1;
+	} elsif($arg eq '--show_coins') {
+		$show_coins = 1;
+	} elsif($arg eq '--show_palettes') {
+		$show_palettes = 1;
+	} elsif($arg eq '--hide_pathnames') {
+		$show_pathnames = 0;
 	} else {
 		die "Unrecognized argument: $arg";
 	}
@@ -25,7 +36,10 @@ while(my $arg = shift @ARGV) {
 
 
 
-my @levels = glob("data/level/*");
+my @levels = glob("data/level/Seaside/*");
+push @levels, glob("data/level/Forest/*");
+push @levels, glob("data/level/Cave/*");
+push @levels, glob("data/level/Dungeon/*");
 
 my %index = ();
 my $index = 1;
@@ -46,7 +60,11 @@ foreach my $level (@levels) {
 	my $door = '';
 	my $saves = 0;
 	my $music = '';
+	my $fg_palettes = '';
+	my $bg_palette = '';
 	my $heart_pieces = 0;
+	my $full_heart_pieces = 0;
+	my $coins = 0;
 
 	while(my $line = <LVL>) {
 		if(my ($toilet) = $line =~ /type"?: "(save_toilet|dungeon_save_door)"/) {
@@ -61,12 +79,41 @@ foreach my $level (@levels) {
 			$music = $song_name;
 		}
 		
+		if(my ($fg_palettes_) = $line =~ /palettes"?: (\[(.*)\]|"(.*)")/) {
+			$fg_palettes = $fg_palettes_;
+			$fg_palettes =~ s/\"//g;
+		}
+		
+		if(my ($bg_palette_) = $line =~ /background_palette"?: "(.*)"/) {
+			$bg_palette = $bg_palette_;
+		}
+		
 		if(my ($heart_object) = $line =~ /type"?: "(max_heart_object)"/) {
-			$heart_pieces += 100;
+			++$full_heart_pieces;
 		}
 		
 		if(my ($heart_object) = $line =~ /type"?: "(partial_max_heart_object)"/) {
 			++$heart_pieces;
+		}
+		
+		if(my ($heart_object) = $line =~ /type"?: "(coin_silver)"/) {
+			$coins += 1;
+		}
+		
+		if(my ($heart_object) = $line =~ /type"?: "(coin_gold)"/) {
+			$coins += 5;
+		}
+		
+		if(my ($heart_object) = $line =~ /type"?: "(coin_gold_big)"/) {
+			$coins += 20;
+		}
+		
+		if(my ($heart_object) = $line =~ /type"?: "(coin_gold_enormous)"/) {
+			$coins += 100;
+		}
+		
+		if(my ($heart_object) = $line =~ /type"?: "(gold_berry)"/) {
+			$coins += 1;
 		}
 		
 		if(my ($next_level) = $line =~ /next_level"?: "(.*)"/) {
@@ -91,10 +138,20 @@ foreach my $level (@levels) {
 		$label .= "\\n";
 		$label .= $music;
 	}
-	if($show_heart_pieces and $heart_pieces > 0){
+	if($show_palettes){
+		$label .= "\\n";
+		$label .= $fg_palettes . " fg";
+		$label .= "\\n";
+		$label .= $bg_palette . " bg";
+	}
+	if($show_heart_pieces and ($heart_pieces > 0 or $full_heart_pieces > 0)){
 		use integer;
 		$label .= "\\n";
-		$label .= $heart_pieces/100 . " full " . $heart_pieces%100 . " partial hearts";
+		$label .= $full_heart_pieces . " full " . $heart_pieces . " partial hearts";
+	}
+	if($show_coins and $coins > 0){
+		$label .= "\\n";
+		$label .= "coins worth " . $coins;
 	}
 	
 	print qq~N$index [label="$label",shape=box,fontsize=12];\n~;
@@ -105,8 +162,14 @@ foreach my $level (@levels) {
 foreach my $adj (@adj) {
 	my ($src, $dst, $door) = @$adj;
 	my ($a, $b) = ($index{$src}, $index{$dst});
-	print qq~N$a -> N$b [label="$door", weight=1, style="setlinewidth(1.0)"];\n~
-	   if $a and $b;
+		if($show_pathnames) {
+		print qq~N$a -> N$b [label="$door", weight=1, style="setlinewidth(1.0)"];\n~
+	   		if $a and $b;
+	   		}
+	   	else {
+	   	print qq~N$a -> N$b [weight=1, style="setlinewidth(1.0)"];\n~
+	   		if $a and $b;
+	   	}
 }
 
 print "}";

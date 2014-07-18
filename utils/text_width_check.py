@@ -6,7 +6,7 @@ import os, sys, codecs
 #e.g.:
 #utils/text_width_check.py po/frogatto.pot 360
 global MAXWIDTH
-MAXWIDTH = 350
+MAXWIDTH = 360
 
 def main(catalog):
 	if catalog.split('.')[-1] == "pot":
@@ -21,35 +21,26 @@ def main(catalog):
 			font = "dialog_font.cfg"
 	else: return
 	
-	fontdata = codecs.open("data/" + font, encoding="utf-8").readlines()
+	fontdata = codecs.open("../../data/" + font, encoding="utf-8").readlines()
 	fontdata = [x.strip() for x in fontdata]
 	charwidths = {}
 	i = 0
+	#default kerning for fonts
+	kerning = 2
 	while i < len(fontdata):
-		if fontdata[i] == "[font]":
-			fontid = ""
-			#found a font, must check if it's the desired one
-			while fontdata[i] != "[chars]":
-				if "id=" in fontdata[i]:
-					fontid = fontdata[i]
-				i += 1
-			if not "default" in fontid:
-				continue
-			chars=[]
-			while fontdata[i] != "[/font]":
-				if "chars=" in fontdata[i]:
-					chars = list(fontdata[i].split("=", 1)[1])
-				elif "width=" in fontdata[i]:
-					for x in chars:
-						charwidths[x]=int(fontdata[i].split("=")[1])
-				elif "rect" in fontdata[i]:
-					width = fontdata[i].split('=')[1].split(',')
-					width = int(width[2]) - int(width[0]) + 1
-					for x in chars:
-						charwidths[x]=width
-				i += 1
-		i+=1
-	
+		if "kerning:" in fontdata[i]:
+			kerning = int(fontdata[i].split(":")[1].replace(',',''))
+		if "chars: \"" in fontdata[i]:
+			chars = list(fontdata[i].split(":", 1)[1].replace(" \"", "",1).replace("\",", "",1))
+		elif "width:" in fontdata[i]:
+			for x in chars:
+				charwidths[x]=int(fontdata[i].split(":")[1].replace(',',''))
+		elif "rect:" in fontdata[i]:
+			width = fontdata[i].replace('[','').replace(']','').split(':')[1].split(',')[:-1]
+			width = int(width[2]) - int(width[0]) + 1
+			for x in chars:
+				charwidths[x]=width
+		i += 1
 	
 	f = codecs.open(catalog, encoding="utf-8").readlines()
 	#start from the first message line, i. e., the first with a #:
@@ -59,13 +50,13 @@ def main(catalog):
 		if "#:" in f[l] and "#:" not in f[l-1]:
 			msgline = l
 		if check in f[l]:
-			linewidth = checkwidth(getmessage(f[l]), charwidths)
+			linewidth = checkwidth(getmessage(f[l]), charwidths, kerning)
 			if linewidth > MAXWIDTH:
 				printline(f, msgline, linewidth)
 			if len(getmessage(f[l])) == 0:
 				l += 1
 				while l < len(f) and '"' in f[l] and f[l][0] != "m":
-					linewidth = checkwidth(getmessage(f[l]), charwidths)
+					linewidth = checkwidth(getmessage(f[l]), charwidths, kerning)
 					if linewidth > MAXWIDTH:
 						printline(f, msgline, linewidth)
 					l += 1
@@ -73,18 +64,18 @@ def main(catalog):
 		
 def printline(f, start, width):
 	line = start
-	print str(width) + " pixels:"
+	sys.stdout.write((str(width) + " pixels:\n").encode("utf-8"))
 	while len(f[line].strip()) > 0:
-		print f[line].strip()
+		sys.stdout.write((f[line].strip()+"\n").encode("utf-8"))
 		line += 1
-	print
+	sys.stdout.write("\n".encode("utf-8"))
 	
-def checkwidth(line, widths):
+def checkwidth(line, widths, kerning):
 	result = 0
 	for x in line:
 		if x in widths.keys():
-			result += widths[x] + 2
-	return result - 2
+			result += widths[x] + kerning
+	return result - kerning
 			
 def getmessage(line):
 	if line[0] == "m":
@@ -98,4 +89,6 @@ if __name__ == "__main__":
 	elif len(sys.argv) == 3:
 		MAXWIDTH = int(sys.argv[2])
 		main(sys.argv[1])
+	else:
+		pass
 
